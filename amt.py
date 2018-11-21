@@ -26,19 +26,19 @@ sub_codec_blacklist = ("dvdsub", "dvd_subtitle", "pgssub")
 
 def collect_stream_metadata(filename):
     """
-    Returns a list of streams' metadata present in the media file passed as 
-    the argument (filename) 
+    Returns a list of streams' metadata present in the media file passed as
+    the argument (filename)
     """
     command = 'ffprobe -i "{}" -show_streams -of json'.format(filename)
     args = shlex.split(command)
     p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          universal_newlines=True)
     out, err = p.communicate()
-    
+
     json_data = JSONDecoder().decode(out)
-    
+
     return json_data
-        
+
 
 def PrintException():
     exc_type, exc_obj, tb = sys.exc_info()
@@ -103,6 +103,21 @@ def remove_common_files(list1, list2):
     new_list1.sort()
     return new_list1
 
+def enumerate_movie_list(movie_list):
+    for idx, val in enumerate(movie_list):
+        print(str(idx) + ": " + str(val['title']) + " (" +
+              str(val['year']) + ")\n")
+
+def get_alternate_entries(imdb):
+    movie_results = []
+    title = input('Enter alternate/correct movie title >> ')
+    results = imdb.search_for_title(title)
+    for result in results:
+        if result['type'] == "feature":
+            movie_results.append(result)
+
+    return movie_results
+
 
 def start_process(filenames, mode):
     """
@@ -119,7 +134,7 @@ def start_process(filenames, mode):
     for filename in filenames:
         try:
             title = filename[:-4]
-            
+
             stream_md = collect_stream_metadata(filename)
             streams_to_process = []
             dvdsub_exists=False
@@ -128,42 +143,56 @@ def start_process(filenames, mode):
                     streams_to_process.append(stream['index'])
                 else:
                     dvdsub_exists=True
-            
+
             print('\nSearching IMDb for "{}"'.format(title))
-            
+
             imdb = Imdb()
             movie_results = []
             results = imdb.search_for_title(title)
             for result in results:
                 if result['type'] == "feature":
                     movie_results.append(result)
-                    
+
             if not movie_results:
                 while not movie_results:
                     title = input('\nNo results for "' + title +
                                   '" Enter alternate/correct movie title >> ')
-                    
+
                     results = imdb.search_for_title(title)
                     for result in results:
                         if result['type'] == "feature":
                             movie_results.append(result)
-                
+
+            # Give user the results and force them to pick one
+            print('Select the right title:\n')
+            enumerate_movie_list(movie_results)
+
+            choice = input("Selection >> ")
+            while int(choice) >= len(movie_results):
+                movie_results = get_alternate_entries(imdb)
+                print('Select the right title:\n')
+                enumerate_movie_list(movie_results)
+
+                # Get selection
+                choice = input("Selection >> ")
+
+
             # The most prominent result is the first one
             # mpr - Most Prominent Result
-            mpr = movie_results[0]
+            mpr = movie_results[int(choice)]
             print('\nFetching data for {} ({})'.format(mpr['title'],
                                                        mpr['year']))
-                                                     
+
             # imdb_movie is a dict of info about the movie
             imdb_movie = imdb.get_title(mpr['imdb_id'])
-            
+
             imdb_movie_title = imdb_movie['base']['title']
             imdb_movie_year = imdb_movie['base']['year']
             imdb_movie_id = mpr['imdb_id']
-                        
-            
+
+
             imdb_movie_rating = imdb_movie['ratings']['rating']
-            
+
             if not 'outline' in imdb_movie['plot']:
                 imdb_movie_plot_outline = (imdb_movie['plot']['summaries'][0]
                                            ['text'])
@@ -171,28 +200,28 @@ def start_process(filenames, mode):
                         "instead.\n\n")
             else:
                 imdb_movie_plot_outline = imdb_movie['plot']['outline']['text']
-            
+
             # Composing a string to have the rating and the plot of the
-            # movie which will go into the 'comment' metadata of the 
+            # movie which will go into the 'comment' metadata of the
             # mp4 file.
             imdb_rating_and_plot = str('IMDb rating ['
                                        + str(float(imdb_movie_rating))
                                        + '/10] - '
                                        + imdb_movie_plot_outline)
-                                       
-            
+
+
             imdb_movie_genres = imdb.get_title_genres(imdb_movie_id)['genres']
-            
+
             # Composing the 'genre' string of the movie.
             # I use ';' as a delimeter to searate the multiple genre values
             genre = ';'.join(imdb_movie_genres)
-            
-            
+
+
             newfilename = (imdb_movie_title
                            + ' ('
                            + str(imdb_movie_year)
                            + ').mp4')
-                           
+
             # We don't want the characters not allowed in a filename
             newfilename = (newfilename
                            .replace(':', ' -')
@@ -203,9 +232,9 @@ def start_process(filenames, mode):
             stream_map = []
             for f in streams_to_process:
                 stream_map.append("-map 0:{}".format(f))
-            stream_map_str = ' '.join(stream_map)           
-            
-            
+            stream_map_str = ' '.join(stream_map)
+
+
 
             if mode == 1:
                 # it is required to rename it as its already an mp4 file that
@@ -229,7 +258,7 @@ def start_process(filenames, mode):
                            + ' -c copy -c:s mov_text '
                              '"' + newfilename + '"')
                 subprocess.run(shlex.split(command))
-                
+
             if dvdsub_exists:
                 print("\nRemoved DVD Subtitles due to uncompatibility with "
                       "mp4 file format")
@@ -242,16 +271,16 @@ def start_process(filenames, mode):
                 print('\nFetching the movie poster...')
                 tmdb_find = tmdb.Find(imdb_movie_id)
                 tmdb_find.info(external_source = 'imdb_id')
-                
+
                 path = tmdb_find.movie_results[0]['poster_path']
                 complete_path = r'https://image.tmdb.org/t/p/w780' + path
-                
+
                 uo = urllib.request.urlopen(complete_path)
                 with open(poster_filename, "wb") as poster_file:
                     poster_file.write(uo.read())
                     poster_file.close()
-            
-            
+
+
 
             video = MP4(newfilename)
             with open(poster_filename, "rb") as f:
@@ -290,7 +319,7 @@ def start_process(filenames, mode):
                     if not os.path.exists('auto fixed files'):
                         os.makedirs('auto fixed files')
                     os.rename(newfilename[:-4]
-                              + 'new.mp4', 'auto fixed files\\'
+                              + 'new.mp4', 'auto fixed files/'
                               + newfilename[:-4] + '.mp4')
                     os.remove(newfilename)
 
@@ -311,7 +340,7 @@ def start_process(filenames, mode):
             errored_files.append(filename + ' - ' + str(e))
             PrintException()
 
-                                                                               
+
 mp4_filenames = []
 mkv_filenames = []
 srt_filenames = []
