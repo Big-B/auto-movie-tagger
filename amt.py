@@ -150,7 +150,7 @@ def start_process(filenames, mode):
             movie_results = []
             results = imdb.search_for_title(title)
             for result in results:
-                if result['type'] == "feature":
+                if result['type'] == "feature" or result['type'] == "video":
                     movie_results.append(result)
 
             if not movie_results:
